@@ -11,7 +11,10 @@ use crate::{
     iterator::{U8Iterator, U8NodeItem},
     parser::Parser,
 };
-use color_eyre::{eyre::Context, Result};
+use color_eyre::{
+    eyre::{Context, ContextCompat},
+    Result,
+};
 use derivative::Derivative;
 use log::{debug, info, warn};
 
@@ -188,8 +191,12 @@ fn main() -> Result<()> {
         .chain(std::io::stdout())
         .apply()?;
 
-    let filename = "Aquadrom.wbz";
-    let wbz_file = std::fs::File::open(filename)?;
+    let mut filename = std::env::args()
+        .nth(1)
+        .map(std::path::PathBuf::from)
+        .wrap_err("First argument must be a path to a WBZ file")?;
+
+    let wbz_file = std::fs::File::open(&filename)?;
     let mut wbz_reader = Parser::new(BufReader::new(wbz_file));
 
     debug!("Checking signature of WBZ");
@@ -213,7 +220,13 @@ fn main() -> Result<()> {
     // Setup new magic
     u8_file[0..4].copy_from_slice(&U8_MAGIC);
 
+    // Setup new filename
+    let mut stem = filename.file_stem().unwrap().to_owned();
+    stem.push(".u8");
+
+    filename.set_file_name(stem);
+
     info!("Decoded WBZ file to U8 file");
-    std::fs::write("Aquadrom.u8", u8_file)?;
+    std::fs::write(filename, u8_file)?;
     Ok(())
 }
