@@ -1,14 +1,19 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::cast_lossless)]
+
 use std::{
     cell::RefCell,
     io::{copy, BufReader, Cursor},
     rc::Rc,
 };
 
-use crate::parser::Parser;
+use crate::{
+    iterator::{U8Iterator, U8NodeItem},
+    parser::Parser,
+};
 use color_eyre::{eyre::Context, Result};
 use derivative::Derivative;
-use iterator::{U8Iterator, U8NodeItem};
-use log::{debug, info, trace, warn};
+use log::{debug, info, warn};
 
 mod iterator;
 mod parser;
@@ -177,7 +182,7 @@ fn main() -> Result<()> {
     let colours = fern::colors::ColoredLevelConfig::new();
     fern::Dispatch::new()
         .format(move |out, msg, rec| {
-            out.finish(format_args!("[{}] {}", colours.color(rec.level()), msg))
+            out.finish(format_args!("[{}] {}", colours.color(rec.level()), msg));
         })
         .level(log::LevelFilter::Info)
         .chain(std::io::stdout())
@@ -203,10 +208,9 @@ fn main() -> Result<()> {
 
     // Create and run the decryption process
     let wu8_decoder = WU8Decoder::new(wu8_reader)?;
-    let u8_reader = wu8_decoder.run()?;
+    let mut u8_file = wu8_decoder.run()?.into_inner().into_inner();
 
     // Setup new magic
-    let mut u8_file = u8_reader.into_inner().into_inner();
     u8_file[0..4].copy_from_slice(&U8_MAGIC);
 
     info!("Decoded WBZ file to U8 file");

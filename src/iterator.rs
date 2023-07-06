@@ -15,6 +15,7 @@ pub enum U8NodeItem {
     Directory,
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub struct U8Iterator {
     file: Rc<RefCell<Parser<Cursor<Vec<u8>>>>>,
     dir_stack: ArrayVec<U8Node, 3>,
@@ -45,9 +46,9 @@ impl Iterator for U8Iterator {
     fn next(&mut self) -> Option<Self::Item> {
         if self.iteration == self.node_count {
             return None;
-        } else {
-            self.iteration += 1;
         }
+
+        self.iteration += 1;
 
         let mut file = self.file.borrow_mut();
         let node = match file.read_node() {
