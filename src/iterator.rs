@@ -1,6 +1,7 @@
 use std::{cell::RefCell, io::Cursor, path::PathBuf, rc::Rc};
 
 use arrayvec::ArrayVec;
+use log::debug;
 
 use crate::{parser::Parser, Result, U8Node};
 
@@ -72,13 +73,13 @@ impl Iterator for U8Iterator {
                 let dir_res = file.read_string(self.string_table_start, dir_off);
                 let dir_name = dir_res.as_deref().unwrap_or("No name!");
 
-                println!("Found the end of {dir_name}");
+                debug!("Found the end of {dir_name}");
                 self.dir_stack.pop();
             }
         }
 
         if node.is_dir {
-            println!("Entering directory {name}");
+            debug!("Entering directory {name}");
             self.dir_stack.push(node);
 
             return Some(U8NodeItem::Directory);
