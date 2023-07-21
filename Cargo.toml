@@ -1,18 +1,19 @@
 [package]
-name = "wbz-szs-rs"
+name = "wbz_converter"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrayvec = "0.7.4"
 bzip2-rs = { version = "0.1.2", features = ["rustc_1_51"] }
-color-eyre = "0.6.2"
 derivative = "2.2.0"
-fern = { version = "0.6.2", features = ["colored"] }
+thiserror = "1.0.44"
+arrayvec = "0.7.4"
 log = "0.4.19"
 ux = "0.1.5"
 
-[profile.dev.package."*"]
-opt-level = 3
+fern = { version = "0.6.2", features = ["colored"], optional = true }
+
+[features]
+bin = ["fern"]

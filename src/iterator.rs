@@ -1,37 +1,45 @@
-use std::{cell::RefCell, io::Cursor, path::PathBuf, rc::Rc};
+use std::{
+    cell::RefCell,
+    io::Cursor,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use arrayvec::ArrayVec;
 use log::debug;
 
-use crate::{parser::Parser, Result, U8Node};
+use crate::{parser::Parser, Error, U8Node};
 
-pub enum U8NodeItem {
+pub(crate) enum U8NodeItem {
     File {
         node: U8Node,
         original_data: Option<Vec<u8>>,
         name: String,
     },
-    Error(color_eyre::eyre::Error),
+    Error(Error),
     Directory,
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub struct U8Iterator {
-    file: Rc<RefCell<Parser<Cursor<Vec<u8>>>>>,
+pub(crate) struct U8Iterator<'a, 'b> {
+    file: Rc<RefCell<Parser<Cursor<&'b mut [u8]>>>>,
     dir_stack: ArrayVec<U8Node, 3>,
     string_table_start: u32,
+    autoadd_path: &'a Path,
     node_count: u32,
     iteration: u32,
 }
 
-impl U8Iterator {
+impl<'a, 'b> U8Iterator<'a, 'b> {
     pub fn new(
-        file: Rc<RefCell<Parser<Cursor<Vec<u8>>>>>,
+        file: Rc<RefCell<Parser<Cursor<&'b mut [u8]>>>>,
         nodes: u32,
         string_table_start: u32,
+        autoadd_path: &'a Path,
     ) -> Self {
         Self {
             file,
+            autoadd_path,
             iteration: 0,
             node_count: nodes,
             string_table_start,
@@ -40,7 +48,7 @@ impl U8Iterator {
     }
 }
 
-impl Iterator for U8Iterator {
+impl Iterator for U8Iterator<'_, '_> {
     type Item = U8NodeItem;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -93,10 +101,10 @@ impl Iterator for U8Iterator {
             .iter()
             .map(|node| file.read_string(self.string_table_start, node.name_offset.into()));
 
-        let path = match std::iter::once(Ok(String::from("/usr/local/share/szs/auto-add/")))
+        let path = match std::iter::once(Ok(self.autoadd_path.to_string_lossy().into_owned()))
             .chain(dir_iter)
             .chain(std::iter::once(Ok(name.clone())))
-            .collect::<Result<PathBuf>>()
+            .collect::<Result<PathBuf, Error>>()
         {
             Ok(path) => path,
             Err(err) => return Some(U8NodeItem::Error(err)),
@@ -105,7 +113,7 @@ impl Iterator for U8Iterator {
         let original_data = match std::fs::read(path) {
             Ok(data) => Some(data),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-            Err(err) => return Some(U8NodeItem::Error(err.into())),
+            Err(err) => return Some(U8NodeItem::Error(Error::FileOperationFailed(err))),
         };
 
         Some(U8NodeItem::File {

@@ -8,6 +8,9 @@ and has been built to teach me how this file format works for implementation in 
 Due to this, it is entirely acceptable for this program to summon demons when run, but for the one (1) test file I used it worked
 bit perfect to `wszst decompress --u8`.
 
-## Usage
+## Binary Usage
 
 `wbz-szs-rs file.wbz` - Outputs `file.u8` which can be repackaged into an `SZS` or other Track container.
+
+## Library Usage
+See `cargo doc`.
