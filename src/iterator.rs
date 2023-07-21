@@ -67,7 +67,7 @@ impl Iterator for U8Iterator {
             Err(err) => return Some(U8NodeItem::Error(err)),
         };
 
-        if let Some(current_dir) = self.dir_stack.last() {
+        while let Some(current_dir) = self.dir_stack.last() {
             if current_dir.size == self.iteration - 1 {
                 let dir_off = current_dir.name_offset.into();
 
@@ -76,6 +76,8 @@ impl Iterator for U8Iterator {
 
                 debug!("Found the end of {dir_name}");
                 self.dir_stack.pop();
+            } else {
+                break;
             }
         }
 
