@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bzip2-rs = { version = "0.1.2", features = ["rustc_1_51"] }
 derivative = "2.2.0"
 thiserror = "1.0.44"
 arrayvec = "0.7.4"
@@ -14,6 +13,7 @@ log = "0.4.19"
 ux = "0.1.5"
 
 fern = { version = "0.6.2", features = ["colored"], optional = true }
+bzip2 = { version = "0.4.4", features = ["static"] }
 
 [features]
 bin = ["fern"]

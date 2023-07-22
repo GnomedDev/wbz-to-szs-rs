@@ -1,6 +1,17 @@
 use std::io::{Read, Seek};
 
-use crate::{Error, U8Header, U8Node};
+use derivative::Derivative;
+
+use crate::{Error, U8Node};
+
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub(crate) struct U8Header {
+    pub magic: [u8; 4],
+    pub node_offset: u32,
+    pub meta_size: u32,
+    pub data_offset: u32,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Parser<T: Read + Seek>(T);

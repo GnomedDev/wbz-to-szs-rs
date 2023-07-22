@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 
 use crate::U8Node;
 
@@ -10,11 +10,12 @@ pub(crate) fn derive_starting_key(size: u32) -> u8 {
     starting_key
 }
 
-pub(crate) fn perform_header_pass(file: &mut [u8], key: u8, start_pos: usize, meta_size: usize) {
+pub(crate) fn perform_header_pass(file: &mut [u8], key: u8, start_pos: u32, meta_size: u32) {
+    debug!("Performing node header data pass");
     file.as_mut()
         .iter_mut()
-        .skip(start_pos)
-        .take(meta_size)
+        .skip(start_pos as usize)
+        .take(meta_size as usize)
         .for_each(|byte| *byte ^= key);
 }
 

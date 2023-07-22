@@ -1,44 +1,34 @@
 //! # WBZ Converter
 //!
 //! This library allows you to convert [WBZ](https://wiki.tockdom.com/wiki/WBZ) files and [WU8](https://wiki.tockdom.com/wiki/WU8_(File_Format))
-//! files into [U8](https://wiki.tockdom.com/wiki/U8_(File_Format)) files, for use in Mario Kart Wii modding.
+//! files into [U8](https://wiki.tockdom.com/wiki/U8_(File_Format)) files, and back, for use in Mario Kart Wii modding.
 //!
-//! Currently only decompress/decode functionality is implemented, and has not been fully tested, so here be dragons.
+//! This library has not been fully tested, so here be dragons.
 
 #![warn(clippy::pedantic)]
-#![allow(clippy::cast_lossless)]
+#![allow(clippy::cast_lossless, clippy::similar_names)]
 
 use std::{
     cell::RefCell,
-    io::{Cursor, Read, Seek},
+    io::{Cursor, Read, Seek, Write},
     path::Path,
     rc::Rc,
 };
 
-use derivative::Derivative;
 use log::{debug, warn};
 
 use crate::{
-    decrypt::{derive_starting_key, perform_header_pass, perform_pass_one, perform_pass_two},
     iterator::{U8Iterator, U8NodeItem},
     parser::Parser,
+    passes::{derive_starting_key, perform_header_pass, perform_pass_one, perform_pass_two},
 };
 
-mod decrypt;
 mod iterator;
 mod parser;
+mod passes;
 
 const U8_MAGIC: [u8; 4] = [0x55, 0xAA, 0x38, 0x2D];
 const WU8_MAGIC: u32 = u32::from_ne_bytes(*b"WU8a");
-
-#[derive(Derivative)]
-#[derivative(Debug)]
-pub(crate) struct U8Header {
-    magic: [u8; 4],
-    node_offset: u32,
-    meta_size: u32,
-    data_offset: u32,
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct U8Node {
@@ -49,9 +39,10 @@ pub(crate) struct U8Node {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
-    #[error("BZip decompression failed")]
-    BZip(std::io::Error),
+    #[error("BZip (de)compression failed")]
+    BZip(bzip2::Error),
     #[error("The file provided is above 4GB in size")]
     FileTooBig(std::num::TryFromIntError),
     #[error("Underlying error when reading from file")]
@@ -60,6 +51,8 @@ pub enum Error {
     InvalidWBZMagic { found_magic: [u8; 8] },
     #[error("WU8 file did not contain valid magic")]
     InvalidWU8Magic { found_magic: [u8; 4] },
+    #[error("U8 file did not contain valid magic")]
+    InvalidU8Magic { found_magic: [u8; 4] },
     #[error("WBZ file contained an invalid string")]
     InvalidString(std::str::Utf8Error),
     #[error("WBZ file contained an invalid boolean")]
@@ -72,31 +65,70 @@ pub enum Error {
 /// Errors if the file is an invalid WBZ file, which includes invalid magic or a too large file.
 ///
 /// See [`Error`] for all possible failure states.
-#[allow(clippy::missing_panics_doc)]
-pub fn decode_wbz(wbz_file: impl Read + Seek, autoadd_path: &Path) -> Result<Vec<u8>, Error> {
-    let mut wbz_reader = Parser::new(wbz_file);
-
+pub fn decode_wbz(
+    wbz_file: impl Read + Seek + Copy,
+    autoadd_path: &Path,
+) -> Result<Vec<u8>, Error> {
     debug!("Checking signature of WBZ");
-    let magic_bytes = wbz_reader.read::<8>().map_err(Error::FileOperationFailed)?;
+    let mut parser = Parser::new(wbz_file);
+    let magic_bytes = parser.read::<8>().map_err(Error::FileOperationFailed)?;
+
     if magic_bytes != *b"WBZaWU8a" {
         return Err(Error::InvalidWBZMagic {
             found_magic: magic_bytes,
         });
     }
 
-    wbz_reader.read::<8>().map_err(Error::FileOperationFailed)?; // Skip to the start of the bzip'd data.
+    parser.read::<8>().map_err(Error::FileOperationFailed)?;
 
     debug!("Decompressing WU8 file");
-    let mut wu8_reader_raw = Cursor::new(Vec::new());
-    std::io::copy(
-        &mut bzip2_rs::DecoderReader::new(wbz_reader.into_inner()),
-        &mut wu8_reader_raw,
-    )
-    .map_err(Error::BZip)?;
+    let mut wu8_file = Vec::new();
+    bzip2::read::BzDecoder::new(wbz_file)
+        .read_to_end(&mut wu8_file)
+        .map_err(Error::FileOperationFailed)?;
 
-    let mut wu8_file = wu8_reader_raw.into_inner();
     decode_wu8(&mut wu8_file, autoadd_path)?;
     Ok(wu8_file)
+}
+
+/// Compresses a U8 file into the equivalent WBZ file.
+///
+/// `u8_file` will also be mutated to contain the decompressed WU8 file.
+///
+/// # Errors
+/// Errors if the file is an invalid U8 file, which includes invalid magic or a too large file.
+///
+/// See [`Error`] for all possible failure states.
+pub fn encode_wbz(
+    u8_file: &mut [u8],
+    mut wbz_file: impl Write,
+    autoadd_path: &Path,
+) -> Result<(), Error> {
+    debug!("Checking signature of U8 file");
+    let magic_bytes = u8_file[0..4]
+        .try_into()
+        .map_err(|_| std::io::ErrorKind::Other.into())
+        .map_err(Error::FileOperationFailed)?;
+
+    if magic_bytes != U8_MAGIC {
+        return Err(Error::InvalidWU8Magic {
+            found_magic: magic_bytes,
+        });
+    }
+
+    iterate_wu8(u8_file, autoadd_path, true)?;
+    let wu8_file = u8_file;
+    let wu8_len: u32 = wu8_file.len().try_into().map_err(Error::FileTooBig)?;
+
+    wbz_file
+        .write_all(b"WBZa")
+        .and_then(|_| wbz_file.write_all(&wu8_file[0..8]))
+        .and_then(|_| wbz_file.write_all(&wu8_len.to_be_bytes()))
+        .map_err(Error::FileOperationFailed)?;
+
+    bzip2::write::BzEncoder::new(wbz_file, bzip2::Compression::best())
+        .write_all(wu8_file)
+        .map_err(Error::FileOperationFailed)
 }
 
 /// Decodes a WU8 file into the equivalent U8 file **in place**.
@@ -105,38 +137,47 @@ pub fn decode_wbz(wbz_file: impl Read + Seek, autoadd_path: &Path) -> Result<Vec
 /// Errors if the file is an invalid WU8 file, which includes invalid magic or a too large file.
 ///
 /// See [`Error`] for all possible failure states.
-#[allow(clippy::similar_names, clippy::missing_panics_doc)]
 pub fn decode_wu8(wu8_file: &mut [u8], autoadd_path: &Path) -> Result<(), Error> {
-    let mut wu8_reader = RefCell::new(Parser::new(Cursor::new(wu8_file)));
+    iterate_wu8(wu8_file, autoadd_path, false)
+}
 
+/// Encodes a U8 file into the equivalent WU8 file **in place**.
+///
+/// # Errors
+/// Errors if the file is an invalid U8 file, which includes invalid magic or a too large file.
+///
+/// See [`Error`] for all possible failure states.
+pub fn encode_wu8(u8_file: &mut [u8], autoadd_path: &Path) -> Result<(), Error> {
+    iterate_wu8(u8_file, autoadd_path, true)
+}
+
+fn iterate_wu8(file: &mut [u8], autoadd_path: &Path, encode: bool) -> Result<(), Error> {
+    let size: u32 = file.len().try_into().map_err(Error::FileTooBig)?;
+    let starting_key = derive_starting_key(size);
+
+    let mut reader = RefCell::new(Parser::new(Cursor::new(file)));
+
+    debug!("Parsing header");
     let (starting_key, mut derived_key, header, root_node) = {
-        debug!("Parsing WU8 Header");
-        let wu8_reader = wu8_reader.get_mut();
-        let header = wu8_reader.read_u8_header::<WU8_MAGIC>()?;
-        let size: u32 = wu8_reader
-            .as_mut()
-            .len()
-            .try_into()
-            .map_err(Error::FileTooBig)?;
+        let reader = reader.get_mut();
+        let header = if encode {
+            reader.read_u8_header::<{ u32::from_le_bytes(U8_MAGIC) }>()?
+        } else {
+            reader.read_u8_header::<WU8_MAGIC>()?
+        };
 
-        let start_pos = wu8_reader.position().map_err(Error::FileOperationFailed)?;
+        let start_pos = reader.position().map_err(Error::FileOperationFailed)?;
         assert_eq!(start_pos, header.node_offset);
 
-        // First pass, XOR all node and string table bytes with base key;
-        debug!("Decrypting node header data");
-        let starting_key = derive_starting_key(size);
-
-        perform_header_pass(
-            wu8_reader.as_mut(),
-            starting_key,
-            start_pos as usize,
-            header.meta_size as usize,
-        );
+        if !encode {
+            // First pass, XOR all node and string table bytes with base key
+            perform_header_pass(reader.as_mut(), starting_key, start_pos, header.meta_size);
+        }
 
         // Now, get the initial node to find the node table size
         debug!("Calculating offsets for header data");
-        let root_node = wu8_reader.read_node()?;
-        wu8_reader
+        let root_node = reader.read_node()?;
+        reader
             .set_position(start_pos)
             .map_err(Error::FileOperationFailed)?;
 
@@ -147,10 +188,10 @@ pub fn decode_wu8(wu8_file: &mut [u8], autoadd_path: &Path) -> Result<(), Error>
     let node_header_size = root_node.size * 12;
     let string_table_start = header.node_offset + node_header_size;
 
-    let mut wu8_reader = Rc::new(wu8_reader);
+    let mut reader = Rc::new(reader);
     warn!("Starting decode pass 1 (XOR all object files with auto-add library)");
     for item in U8Iterator::new(
-        wu8_reader.clone(),
+        reader.clone(),
         root_node.size,
         string_table_start,
         autoadd_path,
@@ -172,7 +213,7 @@ pub fn decode_wu8(wu8_file: &mut [u8], autoadd_path: &Path) -> Result<(), Error>
 
         debug!("Starting {name} auto-add XOR");
         perform_pass_one(
-            wu8_reader.borrow_mut().as_mut(),
+            reader.borrow_mut().as_mut(),
             &original_data,
             node,
             starting_key,
@@ -182,15 +223,15 @@ pub fn decode_wu8(wu8_file: &mut [u8], autoadd_path: &Path) -> Result<(), Error>
     {
         // get_mut is safe as the only other handle to the Rc was
         // held by the U8Iterator, which has just been dropped.
-        let file = Rc::get_mut(&mut wu8_reader).unwrap().get_mut();
+        let file = Rc::get_mut(&mut reader).unwrap().get_mut();
         file.set_position(header.node_offset)
             .map_err(Error::FileOperationFailed)?;
     }
 
-    warn!("Starting decode pass 2 (XOR all non-object files with derived key {derived_key})");
+    warn!("Starting pass 2 (XOR all non-object files with derived key {derived_key})");
 
     for item in U8Iterator::new(
-        wu8_reader.clone(),
+        reader.clone(),
         root_node.size,
         string_table_start,
         autoadd_path,
@@ -206,16 +247,24 @@ pub fn decode_wu8(wu8_file: &mut [u8], autoadd_path: &Path) -> Result<(), Error>
         };
 
         debug!("Starting {name} XOR");
-        perform_pass_two(wu8_reader.borrow_mut().as_mut(), node, derived_key);
+        perform_pass_two(reader.borrow_mut().as_mut(), node, derived_key);
     }
 
-    let u8_file = Rc::try_unwrap(wu8_reader)
-        .unwrap()
-        .into_inner()
-        .into_inner()
-        .into_inner();
+    if encode {
+        // Last pass, XOR all node and string table bytes with base key
+        let file = Rc::get_mut(&mut reader).unwrap().get_mut().as_mut();
+        perform_header_pass(file, starting_key, header.node_offset, header.meta_size);
+    }
+
+    let file_refcell = Rc::try_unwrap(reader).unwrap();
+    let file = file_refcell.into_inner().into_inner().into_inner();
 
     // Setup new magic
-    u8_file[0..4].copy_from_slice(&U8_MAGIC);
+    if encode {
+        file[0..4].copy_from_slice(&WU8_MAGIC.to_le_bytes());
+    } else {
+        file[0..4].copy_from_slice(&U8_MAGIC);
+    }
+
     Ok(())
 }
