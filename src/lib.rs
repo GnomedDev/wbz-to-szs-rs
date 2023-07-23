@@ -28,7 +28,7 @@ mod parser;
 mod passes;
 
 const U8_MAGIC: [u8; 4] = [0x55, 0xAA, 0x38, 0x2D];
-const WU8_MAGIC: u32 = u32::from_ne_bytes(*b"WU8a");
+const WU8_MAGIC: [u8; 4] = *b"WU8a";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct U8Node {
@@ -160,7 +160,7 @@ fn iterate_wu8(file: &mut [u8], autoadd_path: &Path, encode: bool) -> Result<(),
         let header = if encode {
             reader.read_u8_header::<{ u32::from_le_bytes(U8_MAGIC) }>()?
         } else {
-            reader.read_u8_header::<WU8_MAGIC>()?
+            reader.read_u8_header::<{ u32::from_le_bytes(WU8_MAGIC) }>()?
         };
 
         let start_pos = reader.position().map_err(Error::FileOperationFailed)?;
@@ -258,7 +258,7 @@ fn iterate_wu8(file: &mut [u8], autoadd_path: &Path, encode: bool) -> Result<(),
 
     // Setup new magic
     if encode {
-        file[0..4].copy_from_slice(&WU8_MAGIC.to_le_bytes());
+        file[0..4].copy_from_slice(&WU8_MAGIC);
     } else {
         file[0..4].copy_from_slice(&U8_MAGIC);
     }
