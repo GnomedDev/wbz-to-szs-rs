@@ -65,12 +65,9 @@ pub enum Error {
 /// Errors if the file is an invalid WBZ file, which includes invalid magic or a too large file.
 ///
 /// See [`Error`] for all possible failure states.
-pub fn decode_wbz(
-    wbz_file: impl Read + Seek + Copy,
-    autoadd_path: &Path,
-) -> Result<Vec<u8>, Error> {
+pub fn decode_wbz(mut wbz_file: impl Read + Seek, autoadd_path: &Path) -> Result<Vec<u8>, Error> {
     debug!("Checking signature of WBZ");
-    let mut parser = Parser::new(wbz_file);
+    let mut parser = Parser::new(&mut wbz_file);
     let magic_bytes = parser.read::<8>().map_err(Error::FileOperationFailed)?;
 
     if magic_bytes != *b"WBZaWU8a" {
@@ -83,7 +80,7 @@ pub fn decode_wbz(
 
     debug!("Decompressing WU8 file");
     let mut wu8_file = Vec::new();
-    bzip2::read::BzDecoder::new(wbz_file)
+    bzip2::read::BzDecoder::new(&mut wbz_file)
         .read_to_end(&mut wu8_file)
         .map_err(Error::FileOperationFailed)?;
 
