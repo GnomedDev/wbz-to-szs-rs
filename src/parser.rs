@@ -47,7 +47,7 @@ impl<T: Read + Seek> Parser<T> {
     }
 
     pub fn read_bool(&mut self) -> Result<bool, Error> {
-        let byte = self.read::<1>().map_err(Error::FileOperationFailed)?;
+        let byte = self.read::<1>()?;
         match byte[0] {
             0 => Ok(false),
             1 => Ok(true),
@@ -71,34 +71,32 @@ impl<T: Read + Seek> Parser<T> {
     ///
     /// Does not change the position of the buffer, as that is reset after reading.
     pub fn read_string(&mut self, table_start: u32, table_offset: u32) -> Result<String, Error> {
-        let starting_pos = self.position().map_err(Error::FileOperationFailed)?;
-        self.set_position(table_start + table_offset)
-            .map_err(Error::FileOperationFailed)?;
+        let starting_pos = self.position()?;
+        self.set_position(table_start + table_offset)?;
 
         let mut out = String::new();
         loop {
-            let byte = self.read_byte().map_err(Error::FileOperationFailed)?;
+            let byte = self.read_byte()?;
             if byte == b'\0' {
-                self.set_position(starting_pos)
-                    .map_err(Error::FileOperationFailed)?;
+                self.set_position(starting_pos)?;
                 return Ok(out);
             }
 
             let byte_str = [byte];
-            out.push_str(std::str::from_utf8(&byte_str).map_err(Error::InvalidString)?);
+            out.push_str(std::str::from_utf8(&byte_str)?);
         }
     }
 
     pub fn read_u8_header<const MAGIC: u32>(&mut self) -> Result<U8Header, Error> {
         let header = U8Header {
-            magic: self.read().map_err(Error::FileOperationFailed)?,
-            node_offset: self.read_u32().map_err(Error::FileOperationFailed)?,
-            meta_size: self.read_u32().map_err(Error::FileOperationFailed)?,
-            data_offset: self.read_u32().map_err(Error::FileOperationFailed)?,
+            magic: self.read()?,
+            node_offset: self.read_u32()?,
+            meta_size: self.read_u32()?,
+            data_offset: self.read_u32()?,
         };
 
         // Skip the padding
-        self.read::<16>().map_err(Error::FileOperationFailed)?;
+        self.read::<16>()?;
 
         let correct_magic = MAGIC.to_ne_bytes();
         if header.magic == correct_magic {
@@ -113,9 +111,9 @@ impl<T: Read + Seek> Parser<T> {
     pub fn read_node(&mut self) -> Result<U8Node, Error> {
         Ok(U8Node {
             is_dir: self.read_bool()?,
-            name_offset: self.read_u24().map_err(Error::FileOperationFailed)?,
-            data_offset: self.read_u32().map_err(Error::FileOperationFailed)?,
-            size: self.read_u32().map_err(Error::FileOperationFailed)?,
+            name_offset: self.read_u24()?,
+            data_offset: self.read_u32()?,
+            size: self.read_u32()?,
         })
     }
 }
