@@ -23,7 +23,7 @@ pub(crate) enum U8NodeItem {
 #[allow(clippy::module_name_repetitions)]
 pub(crate) struct U8Iterator<'a, 'b> {
     file: Rc<RefCell<Parser<Cursor<&'b mut [u8]>>>>,
-    dir_stack: ArrayVec<U8Node, 3>,
+    dir_stack: ArrayVec<U8Node, 5>,
     string_table_start: u32,
     autoadd_path: &'a Path,
     node_count: u32,
@@ -65,11 +65,6 @@ impl Iterator for U8Iterator<'_, '_> {
         };
 
         let name_offset: u32 = node.name_offset.into();
-        // Skip root node
-        if [0, 1].contains(&name_offset) {
-            return Some(U8NodeItem::Directory);
-        }
-
         let name = match file.read_string(self.string_table_start, name_offset) {
             Ok(name) => name,
             Err(err) => return Some(U8NodeItem::Error(err)),
